@@ -1,11 +1,18 @@
 ---
-name: ralph-loop
-description: Set up an autonomous coding loop that spawns Claude Code per task, monitors progress via a watchdog script, handles escalations, and provides status via tmux + iTerm2 notifications. Use when asked to "set up a ralph loop", "autonomous build", "run tasks autonomously", "coding loop", "task runner", or when building a project that needs hands-off autonomous execution with monitoring.
+name: ralph-loop-auto
+description: Fully autonomous coding loop using claude -p (print mode). More reliable than the interactive version — no permission classifier issues, no signal file complications. Use when asked for "autonomous ralph loop", "headless ralph loop", "ralph loop auto", "fire and forget build", or when you want maximum reliability over interactivity.
 ---
 
-# Ralph Loop
+# Ralph Loop (Auto)
 
-Autonomous coding loop: a bash runner spawns a fresh interactive Claude TUI per task from a JSON queue, each in its own tmux window (tab). A watchdog script monitors progress via events.log, handles escalations via `claude -p`, and restarts the runner if it dies. Monitored via tmux + iTerm2 notifications (works over SSH). Each task is fully visible and interactive — attach to any window to watch or redirect the agent.
+Fully autonomous coding loop: a bash runner spawns `claude -p` (print mode) per task from a JSON queue, each in its own tmux window. Output streams to the window and a log file. A watchdog script monitors progress, handles escalations, and restarts the runner if it dies. Monitored via tmux + iTerm2 notifications.
+
+**Key differences from ralph-loop (interactive):**
+- Uses `claude -p --dangerously-skip-permissions` — truly zero permission prompts
+- Not interactive — you can watch output but can't type into the Claude session
+- No auto mode classifier — writes to any path work without issues
+- More reliable for fully hands-off execution
+- Sessions cannot be resumed (print mode doesn't persist sessions)
 
 ## Architecture
 
