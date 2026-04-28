@@ -89,7 +89,7 @@ if [ -n "$PLAN_FILE" ] && [ -f "$PLAN_FILE" ]; then
   cp "$PLAN_FILE" "$RUN_DIR/plan.md"
 elif [ -d "$HOME/.claude/plans" ]; then
   # Auto-detect: grab the most recently modified plan
-  latest_plan=$(ls -t "$HOME/.claude/plans/"*.md 2>/dev/null | head -1)
+  latest_plan=$(ls -t "$HOME/.claude/plans/"*.md 2>/dev/null | head -1 || true)
   if [ -n "$latest_plan" ]; then
     cp "$latest_plan" "$RUN_DIR/plan.md"
     PLAN_FILE="$latest_plan"
@@ -206,6 +206,9 @@ echo "  Attach:    tmux attach -t $SESSION_NAME"
 echo "  Detach:    Ctrl-B then D (inside tmux)"
 echo "  Kill:      tmux kill-session -t $SESSION_NAME"
 echo "  Status:    bash $SCRIPT_DIR/ralph-status.sh $RUN_DIR"
+echo ""
+echo "  Relaunch:  bash $SCRIPT_DIR/ralph-launch.sh $PROJECT_DIR --run-dir $RUN_DIR"
+echo "  Review:    ls $RUN_DIR/logs/*_attempt*.log"
 echo ""
 
 # Attach if we're in an interactive terminal

@@ -105,7 +105,7 @@ Do NOT move on without either creating the .done or .skip file."
   wlog "  spawning claude -p for escalation fix..."
   local esc_log="$LOG_DIR/${task_id}_escalation.log"
   timeout "$ESCALATION_TIMEOUT" \
-    claude -p --dangerously-skip-permissions "$fix_prompt" \
+    claude -p --permission-mode auto "$fix_prompt" \
     2>&1 | tee "$esc_log" || true
 
   if [ -f "$LOG_DIR/${task_id}.done" ]; then

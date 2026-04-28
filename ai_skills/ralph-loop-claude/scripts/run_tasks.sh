@@ -179,8 +179,8 @@ for i in $(seq 0 $((total - 1))); do
     final_attempt=$attempt
     log "  attempt $attempt/$((task_retries + 1))"
 
-    # Clean up any stale signal from previous attempt
-    SIGNAL_FILE="$LOG_DIR/${task_id}.signal_done"
+    # Signal file lives in the project dir so auto mode trusts writes to it
+    SIGNAL_FILE="$PROJECT_DIR/.ralph_done"
     rm -f "$SIGNAL_FILE"
 
     # Paths for this attempt
@@ -209,32 +209,11 @@ for i in $(seq 0 $((total - 1))); do
 
     # Write system addendum to file (injected via --append-system-prompt)
     cat > "$ADDENDUM_FILE" <<SYSEOF
-DESIGN DECISIONS: If you make any notable design decisions, deviate from the plan, choose between alternatives, or change the approach from what was specified, append a short note to $DECISIONS_FILE using this format:
-echo '### $task_name' >> $DECISIONS_FILE
-echo '- <decision description>' >> $DECISIONS_FILE
-echo '' >> $DECISIONS_FILE
-Only log decisions that would matter to someone continuing this work. Skip trivial implementation details.
-
-EVENTS: When you make a significant finding, take a significant action, or encounter an unexpected result, log it to $EVENTS_FILE:
-echo "[\\\$(date -Iseconds)] FINDING: <one-line summary>" >> $EVENTS_FILE
-echo "[\\\$(date -Iseconds)] ACTION: <what you did>" >> $EVENTS_FILE
-echo "[\\\$(date -Iseconds)] ERROR: <what went wrong>" >> $EVENTS_FILE
-
-Examples of what to log:
-- Root cause discoveries
-- Code changes and why
-- Docker image builds/deployments
-- Test results (pass/fail with reason)
-- Unexpected behavior or errors
-
-Do NOT log routine file reads or searches. Only log things a human supervisor would want to know about.
-
-WHEN DONE: After completing your task and verifying the test passes, signal completion:
+WHEN DONE: After completing your task and verifying the test passes:
 1. Stage and commit your changes with a descriptive commit message (no Co-Authored-By lines)
-2. Mark done: echo 0 > $SIGNAL_FILE
-3. Log completion: echo "[\\\$(date -Iseconds)] TASK_COMPLETE: <one-line summary>" >> $EVENTS_FILE
+2. Create a file called $SIGNAL_FILE containing a one-line summary of what you did (use the Write tool or echo)
 
-The session will remain open after you signal completion — the user may continue interacting.
+CRITICAL: Writing that file is the LAST thing you do. After creating it, STOP IMMEDIATELY. Do not take any further actions, do not start new work, do not invoke any skills or commands. The session will be terminated automatically.
 SYSEOF
 
     # Generate per-task wrapper script (like dispatch's _run.sh)
@@ -247,31 +226,92 @@ SYSEOF
       echo "SIG='$SIGNAL_FILE'"
       echo "PROMPT='$PROMPT_FILE'"
       echo "ADDENDUM='$ADDENDUM_FILE'"
+      echo "SESSION='$RALPH_SESSION'"
+      echo "WIN_IDX_FILE='$LOG_DIR/${task_id}_window_index'"
+      echo "TASK_NAME='$task_name'"
+      echo "TASK_ID='$task_id'"
+      echo "TASK_SUMMARY_FILE='$LOG_DIR/${task_id}_summary.md'"
+      echo "RUN_DIR='$RUN_DIR'"
       echo ""
       cat <<'BODYEOF'
 cd "$PROJ"
 
-# Build full prompt: task prompt + system addendum
-FULL_PROMPT="$(cat "$PROMPT")
+TASK_PROMPT="$(cat "$PROMPT")"
+EVENTS_ADDENDUM="$(cat "$ADDENDUM")"
 
-$(cat "$ADDENDUM")"
+# Wait for the runner to write our window index
+while [ ! -f "$WIN_IDX_FILE" ]; do sleep 0.2; done
+WIN_IDX="$(cat "$WIN_IDX_FILE")"
 
-# Run claude -p with live output to the tmux window AND log file
+# Capture raw tmux output for logging
+PANE_ID="${SESSION}:${WIN_IDX}.0"
+tmux pipe-pane -t "$PANE_ID" "cat >> '$CLEAN'" 2>/dev/null || true
+
+# Run interactive Claude TUI — named for resume support
 EXIT_CODE=0
-claude -p --dangerously-skip-permissions "$FULL_PROMPT" \
-  2>&1 | tee "$CLEAN" || EXIT_CODE=${PIPESTATUS[0]}
+claude --permission-mode auto \
+  --name "ralph: $TASK_NAME" \
+  --add-dir "$RUN_DIR" \
+  --append-system-prompt "$EVENTS_ADDENDUM" \
+  "$TASK_PROMPT" &
+CLAUDE_PID=$!
+
+# Background watcher: kill Claude once signal file appears (safety net if agent forgets /exit)
+(while [ ! -f "$SIG" ]; do sleep 2; done; sleep 2; kill $CLAUDE_PID 2>/dev/null) &
+WATCHER_PID=$!
+
+wait $CLAUDE_PID 2>/dev/null || true
+EXIT_CODE=$?
+kill $WATCHER_PID 2>/dev/null || true
+
+# Stop pipe-pane capture
+tmux pipe-pane -t "$PANE_ID" 2>/dev/null || true
+
+# Strip ANSI escape codes from raw capture to produce a searchable log
+if [ -f "$CLEAN" ]; then
+  perl -pe 's/\e\[[0-9;]*[a-zA-Z]//g; s/\e\][^\a]*\a//g; s/\e\([AB)//g; s/\r//g' \
+    "$CLEAN" > "${CLEAN}.tmp" && mv "${CLEAN}.tmp" "$CLEAN"
+fi
 
 # Safety net: if agent didn't signal completion, do it now
 if [ ! -f "$SIG" ]; then
   echo "$EXIT_CODE" > "$SIG"
 fi
+
+# Generate per-task summary
+echo ""
+echo "========================================"
+echo "  Task Complete: $TASK_NAME"
+echo "========================================"
+if [ -f "$CLEAN" ] && [ -s "$CLEAN" ]; then
+  SUMMARY_PROMPT="Summarize this Claude Code task session in 3-5 bullet points. Cover: what was done, key decisions, and final result (pass/fail). Be concise."
+  SUMMARY=$(tail -200 "$CLEAN" | claude -p --permission-mode auto "$SUMMARY_PROMPT" 2>/dev/null || echo "(summary generation failed)")
+  echo "$SUMMARY"
+  {
+    echo "# Task: $TASK_NAME"
+    echo ""
+    echo "$SUMMARY"
+  } > "$TASK_SUMMARY_FILE"
+  echo ""
+  echo "  Summary saved: $TASK_SUMMARY_FILE"
+else
+  echo "  (no log output to summarize)"
+fi
+echo ""
+echo "  Resume session:  claude --resume \"ralph: $TASK_NAME\""
+echo "  Full log:        $CLEAN"
+echo "========================================"
+echo ""
+echo "Press enter to close this window."
 BODYEOF
     } > "$WRAPPER_SCRIPT"
     chmod +x "$WRAPPER_SCRIPT"
 
     log "  launching tmux window: $WINDOW_NAME"
     WINDOW_INDEX=$(tmux new-window -t "$RALPH_SESSION" -n "$WINDOW_NAME" -P -F '#{window_index}' \
-      "bash '$WRAPPER_SCRIPT'; echo ''; echo '--- Task finished. Press enter to close. ---'; read")
+      "bash '$WRAPPER_SCRIPT'; read")
+    # Write window index so the wrapper can set up pipe-pane
+    echo "$WINDOW_INDEX" > "$LOG_DIR/${task_id}_window_index"
     # Prevent tmux from renaming the window to "bash" or "claude"
     tmux set-option -t "${RALPH_SESSION}:${WINDOW_INDEX}" automatic-rename off 2>/dev/null || true
 
@@ -293,6 +333,14 @@ BODYEOF
       rm -f "$LOG_DIR/${task_id}.running"
       success=true
       consecutive_failures=0
+
+      # Log agent's completion summary to events.log, then clean up
+      if [ -f "$SIGNAL_FILE" ]; then
+        agent_summary=$(head -1 "$SIGNAL_FILE")
+        [ -n "$agent_summary" ] && [ "$agent_summary" != "0" ] && \
+          echo "[$(date -Iseconds)] TASK_COMPLETE: $agent_summary" >> "$EVENTS_FILE"
+        rm -f "$SIGNAL_FILE"
+      fi
 
       # Safety net: commit any uncommitted changes the agent missed
       # Use git add -u (tracked files only) to avoid staging ralph artifacts
