@@ -161,6 +161,9 @@ export RALPH_SESSION="$SESSION_NAME"
 
 ENV_FILE="$RUN_DIR/ralph.env"
 
+# Force a usable size for detached sessions (no client = no inherited size)
+tmux set-option -g default-size 200x50 2>/dev/null || true
+
 # Pane 0 (left): Runner — takes up the left half
 tmux new-session -d -s "$SESSION_NAME" -x 200 -y 50 \
   "source '$ENV_FILE' && bash '$SCRIPT_DIR/run_tasks.sh' 2>&1 | tee -a '$RUN_DIR/logs/runner_console.log'; echo '--- Runner exited. Press enter to close. ---'; read"
@@ -170,20 +173,20 @@ tmux new-session -d -s "$SESSION_NAME" -x 200 -y 50 \
 tmux split-window -h -t "$SESSION_NAME" \
   "source '$ENV_FILE' && bash '$SCRIPT_DIR/watchdog.sh' 2>&1 | tee -a '$RUN_DIR/logs/watchdog_console.log'; echo '--- Watchdog exited. Press enter to close. ---'; read"
 
-# Pane 2 (bottom-right): Status watch
+# Pane 2 (bottom-right): Status watch (optional — may fail if terminal is too small)
 tmux split-window -v -t "$SESSION_NAME" \
-  "source '$ENV_FILE' && watch -n 5 -c bash '$SCRIPT_DIR/ralph-status.sh' '$RUN_DIR'"
+  "source '$ENV_FILE' && watch -n 5 -c bash '$SCRIPT_DIR/ralph-status.sh' '$RUN_DIR'" 2>/dev/null || true
 
 # Set pane titles for clarity
-tmux select-pane -t "$SESSION_NAME:0.0" -T "Runner"
-tmux select-pane -t "$SESSION_NAME:0.1" -T "Watchdog"
-tmux select-pane -t "$SESSION_NAME:0.2" -T "Status"
+tmux select-pane -t "$SESSION_NAME:0.0" -T "Runner" 2>/dev/null || true
+tmux select-pane -t "$SESSION_NAME:0.1" -T "Watchdog" 2>/dev/null || true
+tmux select-pane -t "$SESSION_NAME:0.2" -T "Status" 2>/dev/null || true
 
 # Enable pane border status line to show titles
 tmux set-option -t "$SESSION_NAME" pane-border-status top 2>/dev/null || true
 
 # Focus on the runner pane
-tmux select-pane -t "$SESSION_NAME:0.0"
+tmux select-pane -t "$SESSION_NAME:0.0" 2>/dev/null || true
 
 # ── print startup info ──────────────────────────────────────────────────────
 

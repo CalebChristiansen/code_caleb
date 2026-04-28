@@ -197,7 +197,7 @@ while true; do
       # Find the most recently modified log file to gauge activity
       latest_log=$(ls -t "$LOG_DIR"/*.log 2>/dev/null | head -1)
       if [ -n "$latest_log" ]; then
-        last_mod=$(stat -c %Y "$latest_log" 2>/dev/null || echo 0)
+        last_mod=$(stat -f %m "$latest_log" 2>/dev/null || stat -c %Y "$latest_log" 2>/dev/null || echo 0)
         now_epoch=$(date +%s)
         idle_secs=$((now_epoch - last_mod))
         # 15 minutes = 900 seconds

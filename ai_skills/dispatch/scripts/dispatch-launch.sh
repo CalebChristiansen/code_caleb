@@ -216,6 +216,9 @@ export DISPATCH_RUN_DIR="$RUN_DIR"
 export DISPATCH_MODEL="$MODEL"
 export DISPATCH_SESSION="$SESSION_NAME"
 
+# Force a usable size for detached sessions (no client = no inherited size)
+tmux set-option -g default-size 200x50 2>/dev/null || true
+
 # Pane 0 (left): Claude runner
 tmux new-session -d -s "$SESSION_NAME" -x 200 -y 50 \
   "source '$RUN_DIR/dispatch.env' && bash '$RUN_DIR/_run.sh'; echo ''; echo '--- Dispatch complete. Press enter to close. ---'; read"
