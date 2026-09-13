@@ -1,22 +1,20 @@
 ---
 name: new-claude-session
-description: Spawn another Claude Code session detached in tmux and hand back a claude.ai/code Remote Control link the phone can reach. Use when asked to "open a new shell for Claude", "start another session", "spin up another one", "give me a new session", "I need a second Claude", "run this in a separate session", or when a session link is needed to drive work from a phone. Covers the one command, naming sessions, passing an opening prompt, listing and killing sessions, and the failure modes that make a session look alive but be unreachable.
+description: Start, resume, reconnect to, or fork a Claude Code session detached in tmux and hand back a claude.ai/code Remote Control link a phone can reach. Use when asked to "open a new shell for Claude", "start another session", "spin up another one", "give me a new session", "run this in a separate session", or when a session link is needed to drive work from a phone. Also for "resume <session>", "reconnect to <session>", "pick up where we left off", "fork this session", "branch this conversation" — including when the session is named vaguely, wrongly, or not at all. Covers naming sessions, passing an opening prompt, listing and killing sessions, and the failure modes that make a session look alive but be unreachable.
 ---
 
-# Start another Claude session
+# Start, resume, or fork a Claude session
 
-Spawn a second (third, fourth) Claude Code session that survives an SSH drop or a
-phone going to sleep, and hand back a Remote Control link.
+Three verbs, one link at the end of each:
 
-From inside a session:
+| you want | command |
+|---|---|
+| a **new** session | `cd ~ && caleb_claude --detach` |
+| **that one from earlier**, continued | `scripts/cc-resume.sh "<whatever they called it>"` |
+| **a copy** of a session, original left running | `scripts/cc-resume.sh --fork "<name>"` |
 
-```bash
-cd ~ && caleb_claude --detach
-```
-
-It prints three lines — session name, attach command, and the
-`https://claude.ai/code/session_…` link. **Hand over the link.** That is the whole
-handoff: tap it and you're talking to the new session.
+Every one of them prints a `https://claude.ai/code/session_…` line. That link is the
+whole handoff: tap it and you're talking to the session.
 
 ## Install
 
@@ -34,17 +32,25 @@ override with `CC_CLAUDE_BIN`. Never let it resolve a bare `claude`: a stale
 system-wide copy without `--remote-control` dies instantly on an unknown option, the
 pane exits, and the failure reads as "the session won't arm".
 
+`scripts/cc-resume.sh` and `scripts/cc-sessions.py` stay in the skill directory and are
+run by path; they only need `caleb_claude` on `PATH` and `python3`.
+
 `scripts/lclaude` is the same launcher for a second, differently-named account
 (session prefix `lclaude`, keepalive session `lunate` instead of `phone`). The two
 are deliberate near-twins with no shared source — **a fix to one must be hand-carried
 to the other.** They live side by side here so the drift is at least visible.
+`lclaude` does **not** yet carry the `CC_PROMPT` / send-keys fix described below.
 
-## Naming it
-
-`caleb_claude-4` tells nobody anything. A name says what it's for:
+## New session
 
 ```bash
-CC_SESSION=vpn-debug caleb_claude --detach
+cd ~ && caleb_claude --detach
+```
+
+Name it after what it's for — `caleb_claude-4` tells nobody anything:
+
+```bash
+CC_SESSION=vpn-debug caleb_claude --detach "start by reading the wg logs"
 ```
 
 With `CC_SESSION`, an existing session of that name is **attached to**, not recreated —
@@ -52,20 +58,80 @@ a reattach, not a new session, and from inside tmux it fails rather than doing a
 useful. Use a fresh name when you mean a fresh session. Without `CC_SESSION`, each bare
 launch grabs the first free `caleb_claude[-N]`.
 
-## Handing it an opening instruction
+A trailing non-flag argument is an opening instruction, typed in with `send-keys` once
+the bridge arms (claude drops a positional prompt under `--remote-control`; see below).
+`CC_PROMPT=…` sets one without relying on argument position.
 
-Anything after `--detach` passes straight through to `claude`:
+## Resume / reconnect
 
 ```bash
-CC_SESSION=tests caleb_claude --detach "run the healthcheck suite and fix what fails"
+scripts/cc-resume.sh "that auth thing"
 ```
+
+Takes a session UUID or whatever the session was actually called, which is rarely its
+name. It searches every transcript under `~/.claude/projects/`, matches fuzzily against
+the AI-generated title, tmux name, last prompt and directory, then resumes the winner in
+a fresh detached tmux session — in the **original working directory**, under a name
+derived from the title.
+
+The whole conversation comes back: history replayed into the pane, full context, **and
+the same claude.ai/code link it had before.** A resumed session keeps its bridge id, so
+an old link that is still open starts working again.
+
+```bash
+scripts/cc-resume.sh --prompt "carry on with step 3" "the drive one"
+scripts/cc-resume.sh --list 8
+scripts/cc-resume.sh --name debug-redux "silo downloads"
+```
+
+**If it's still running, it says so and hands back the existing link instead** — that
+*is* the reconnect. Do not work around this: `claude --resume` will cheerfully start a
+second process on a live conversation, and then two processes write one transcript and
+both claim one bridge. The phone ends up connected to a coin flip, and the loser prints
+*"Remote Control disconnected — another connection took over"*. `--force` kills the
+running one first, when that is genuinely what's wanted.
+
+If nothing matches, or two candidates are too close to call, it prints the shortlist and
+exits 2 without launching anything. That is the cue to ask rather than guess — a wrong
+guess resumes the wrong conversation, which is worse than a question. Same when the
+request is just "resume" with nothing after it: `--list 5` and let a human pick.
+
+Exit codes: `0` done · `2` no match or a toss-up (shortlist on stdout) · `4` live but
+its bridge never armed · `5` the directory has never been trusted.
+
+## Fork
+
+```bash
+scripts/cc-resume.sh --fork "the reorg one"
+scripts/cc-resume.sh --fork self --prompt "explore the second option instead"
+```
+
+A fork replays the history into a **new session id**: same memory, separate life. The
+original is untouched, keeps its own link, and carries right on — so unlike a resume,
+forking something that is currently running is not only safe, it's the point. Use it to
+try a second approach without spending the first one, or to hand a long,
+expensively-built context to a session that is about to go somewhere risky.
+
+`self` (or `this`) means the session running the command. A session can fork itself; the
+copy wakes up knowing everything the original knew a moment ago, including its own tool
+history, and the original never notices. `--fork` is implied for `self`, because
+"continuing" yourself is just carrying on typing.
 
 ## Listing and cleaning up
 
 ```bash
-tmux ls                              # what's running
-tmux attach -t caleb_claude-2        # attach from a terminal
-tmux kill-session -t caleb_claude-2  # done with it
+scripts/cc-resume.sh --list 10        # sessions with titles, links and live flags
+tmux ls
+tmux attach -t caleb_claude-2
+tmux kill-session -t caleb_claude-2
+```
+
+`cc-sessions.py` is the lister underneath, for anything machine-readable:
+
+```bash
+scripts/cc-sessions.py list -n 10 --json
+scripts/cc-sessions.py match "drive health" -n 5     # ranked, with scores
+scripts/cc-sessions.py self                          # uuid of the calling session
 ```
 
 ## The parts that will catch you out
@@ -76,21 +142,35 @@ tmux kill-session -t caleb_claude-2  # done with it
 - **It takes up to ~30 seconds.** The command polls until Remote Control arms the
   bridge, because a session without a bridge is invisible to the phone. On timeout it
   prints `NOT ARMED` and exits 1 — say so plainly rather than handing over a dead link.
-- **`cd ~` first.** The new session inherits the working directory, and a directory
-  Claude has never seen shows a trust prompt ("Is this a project you trust?"). Attached,
-  a human answers it. Detached, nobody does, and it waits forever: no state file, no
-  bridge, `NOT ARMED`. The flag lives in `~/.claude.json` under
-  `projects → <dir> → hasTrustDialogAccepted`.
+- **A positional prompt does not reach claude.** As of v2.1.270, a prompt passed as an
+  argument under `--remote-control` is silently discarded: the session comes up armed,
+  empty and waiting, which looks exactly like success until you notice nothing has
+  happened. Both scripts route opening instructions through `tmux send-keys`, clearing
+  the input box with `C-u` first — claude restores the last unsent *draft* for a
+  directory and send-keys appends, so without that the new prompt gets welded onto the
+  tail of whatever was abandoned there and both go in as one sentence.
+- **`cd ~` first when starting something new.** The new session inherits the working
+  directory, and a directory Claude has never seen shows a trust prompt ("Is this a
+  project you trust?"). Attached, a human answers it. Detached, nobody does, and it
+  waits forever: no state file, no bridge, `NOT ARMED`. The flag lives in
+  `~/.claude.json` under `projects → <dir> → hasTrustDialogAccepted`. `cc-resume.sh`
+  checks this up front and refuses with exit 5 rather than letting you watch a pane do
+  nothing for half a minute.
+- **Resume is not directory-scoped, but the resumed session still inherits a cwd.**
+  `--resume <uuid>` finds the conversation from anywhere, then drops it in whatever
+  directory you happened to be standing in — quietly repointing it at a different
+  project. `cc-resume.sh` cds back to where the conversation actually lived.
 - **Never type `/remote-control` at a session to fix it.** That command *toggles*. Aimed
   at a session that armed a little late, it switches a working bridge off, and the
   result is indistinguishable from an upstream outage.
 - **Leave the cron-managed session alone.** The always-on one (`phone`, or `lunate` on
   the other account) is respawned by a keepalive every five minutes. Manual sessions are
-  named `caleb_claude[-N]` and never collide with it.
+  named `caleb_claude[-N]`, `resume-…`, `fork-…` and never collide with it.
 - **Keep the number of live sessions sane.** Several long-lived Remote Control processes
   under one account rotate each other's OAuth refresh tokens, and whichever refreshes
   last leaves the others holding a dead one. Two or three is fine. A dozen is an evening
-  spent reading logs in which nothing is wrong.
+  spent reading logs in which nothing is wrong. Kill resumes and forks when they've
+  served their purpose.
 
 ## If it comes up NOT ARMED
 

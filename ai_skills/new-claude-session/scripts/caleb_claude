@@ -4,7 +4,10 @@
 # C-b d; reattach with `tmux attach -t <name>` (see `tmux ls`).
 # Remote Control prints a claude.ai/code/session_… link on its `/rc active` line,
 # so the session is also steerable from the phone / Claude app.
-# Any extra args (e.g. an initial prompt) pass straight through to claude.
+# Any extra args (e.g. an initial prompt) pass straight through to claude —
+# except that under --detach an opening prompt is typed in with send-keys once
+# the bridge is up, because claude drops a positional prompt under
+# --remote-control. CC_PROMPT=... sets one without any guessing.
 # Also invocable as `cclaude`.
 #
 # Each bare launch spins up its own session, so you can run several at once:
@@ -68,6 +71,25 @@ fi
 
 # Fresh session. Reassemble the command with every arg safely re-quoted, since
 # tmux hands the string to /bin/sh -c.
+#
+# In --detach mode a lone non-flag trailing arg is an opening instruction, and
+# claude v2.1.270 SILENTLY DROPS a positional prompt when --remote-control is
+# on: the session comes up armed, empty, and waiting, which looks like success
+# until you notice nothing happened. Hold it back and type it in with
+# send-keys once the bridge is up instead. Flags still pass straight through.
+# CC_PROMPT is the unambiguous way to pass one. Otherwise the trailing arg is
+# an opening instruction only if it is neither a flag nor the VALUE of one —
+# without that second test, `--detach --resume <uuid>` would mistake the uuid
+# for a prompt and start an empty session that types its own id at itself.
+PROMPT="${CC_PROMPT:-}"
+if [ "$DETACH" = 1 ] && [ -z "$PROMPT" ] && [ $# -ge 1 ]; then
+    last="${!#}"; prev=""; [ $# -ge 2 ] && prev="${@: -2:1}"
+    steal=1
+    case "$last" in -*) steal=0 ;; esac
+    case "$prev" in -*) steal=0 ;; esac
+    if [ "$steal" = 1 ]; then PROMPT="$last"; set -- "${@:1:$#-1}"; fi
+fi
+
 CMD="$(printf '%q ' "${CLAUDE[@]}")"
 for a in "$@"; do CMD+=" $(printf '%q' "$a")"; done
 
@@ -119,6 +141,22 @@ echo "session:  $SESSION"
 echo "attach:   tmux attach -t $SESSION"
 if [ -n "$LINK" ]; then
     echo "link:     https://claude.ai/code/$LINK"
+    if [ -n "$PROMPT" ]; then
+        # C-u first: claude restores the last unsent draft for a directory
+        # into the input box, and send-keys APPENDS, so without this the
+        # prompt gets glued onto the tail of whatever someone abandoned there
+        # last week and both get submitted as one sentence.
+        # Then two calls with a beat between them: a literal string and its
+        # Enter sent back to back arrive as one paste, and the TUI puts a line
+        # break in the box rather than submitting.
+        sleep 2
+        tmux send-keys -t "$SESSION" C-u
+        sleep 0.3
+        tmux send-keys -t "$SESSION" -l -- "$PROMPT"
+        sleep 1
+        tmux send-keys -t "$SESSION" Enter
+        echo "prompt:   sent"
+    fi
 else
     echo "link:     NOT ARMED after 30s — the process is up but the phone can't"
     echo "          reach it. Look at it first: tmux attach -t $SESSION"
