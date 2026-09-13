@@ -22,9 +22,8 @@
 #                                claude into a pipe with no TTY instead of
 #                                creating anything. --detach is also the only
 #                                mode that is safe to call from a script.
-#                                (Ported from lunate's `lclaude` 2026-09-08.)
 #
-# The always-on session is named `phone` and is managed by cron via
+# If you keep an always-on session, it is managed by cron via
 # caleb_claude_ensure — these manual sessions never collide with it.
 set -euo pipefail
 
@@ -105,7 +104,7 @@ SESSIONS_DIR="$HOME/.claude/sessions"
 # when it doesn't the pane pid is a surviving `sh -c` with claude as its CHILD —
 # so a state file read at the pane pid never exists and an ARMED session reads
 # as unarmed. Walk down to the first descendant that owns a state file.
-# (Same logic as caleb_claude_ensure's claude_pid(); see server_setup_detailed.md.)
+# (Same logic as the keepalive's claude_pid().)
 claude_pid() {
     local queue="$1" next p
     while [ -n "${queue// /}" ]; do

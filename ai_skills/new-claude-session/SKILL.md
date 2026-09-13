@@ -35,11 +35,12 @@ pane exits, and the failure reads as "the session won't arm".
 `scripts/cc-resume.sh` and `scripts/cc-sessions.py` stay in the skill directory and are
 run by path; they only need `caleb_claude` on `PATH` and `python3`.
 
-`scripts/lclaude` is the same launcher for a second, differently-named account
-(session prefix `lclaude`, keepalive session `lunate` instead of `phone`). The two
-are deliberate near-twins with no shared source — **a fix to one must be hand-carried
-to the other.** They live side by side here so the drift is at least visible.
-`lclaude` does **not** yet carry the `CC_PROMPT` / send-keys fix described below.
+If you run a second Claude account on the same machine, give it its own copy of the
+launcher under its own name, with its own session prefix and its own keepalive
+session name — the two must never collide, because several long-lived Remote Control
+processes under one account rotate each other's OAuth refresh tokens (see the
+failure modes below). Near-twin launchers with no shared source drift; **a fix to one
+has to be hand-carried to the other**, so keep them somewhere the drift is visible.
 
 ## New session
 
@@ -163,9 +164,10 @@ scripts/cc-sessions.py self                          # uuid of the calling sessi
 - **Never type `/remote-control` at a session to fix it.** That command *toggles*. Aimed
   at a session that armed a little late, it switches a working bridge off, and the
   result is indistinguishable from an upstream outage.
-- **Leave the cron-managed session alone.** The always-on one (`phone`, or `lunate` on
-  the other account) is respawned by a keepalive every five minutes. Manual sessions are
-  named `caleb_claude[-N]`, `resume-…`, `fork-…` and never collide with it.
+- **Leave the cron-managed session alone.** If you keep an always-on session, it is
+  respawned by a keepalive every five minutes, so killing it accomplishes nothing and
+  fighting it accomplishes less. Manual sessions are named `caleb_claude[-N]`,
+  `resume-…`, `fork-…` and never collide with it.
 - **Keep the number of live sessions sane.** Several long-lived Remote Control processes
   under one account rotate each other's OAuth refresh tokens, and whichever refreshes
   last leaves the others holding a dead one. Two or three is fine. A dozen is an evening

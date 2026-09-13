@@ -116,7 +116,7 @@ def scan(path):
 
 
 def unslug(dirname):
-    """'-home-fi-healthcheck' -> '/home/fi/healthcheck' (best effort: the
+    """'-home-user-project' -> '/home/user/project' (best effort: the
     slug is lossy, real dashes and separators look identical)."""
     return dirname.replace("-", "/") if dirname.startswith("-") else dirname
 
