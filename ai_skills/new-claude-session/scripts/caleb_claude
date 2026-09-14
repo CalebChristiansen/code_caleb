@@ -10,6 +10,13 @@
 # --remote-control. CC_PROMPT=... sets one without any guessing.
 # Also invocable as `cclaude`.
 #
+# Set CC_REPO below and a launch from $HOME starts the session there instead,
+# because CLAUDE.md is only read from the directory claude actually starts in —
+# point it at the repo whose CLAUDE.md describes the machine and every new
+# session comes up knowing where it is. CC_CWD=/path starts somewhere else;
+# CC_CWD=. stays exactly where you are. Resuming is exempt — a conversation
+# keeps its own cwd.
+#
 # Each bare launch spins up its own session, so you can run several at once:
 #   caleb_claude          -> caleb_claude, then caleb_claude-2, -3, ... as needed
 # Pin/reattach a named one instead with CC_SESSION:
@@ -40,6 +47,66 @@ esac
 CLAUDE_BIN="${CC_CLAUDE_BIN:-$HOME/.npm-global/bin/claude}"
 [ -x "$CLAUDE_BIN" ] || CLAUDE_BIN="$(command -v claude || echo claude)"
 CLAUDE=("$CLAUDE_BIN" --dangerously-skip-permissions --remote-control)
+
+# ---- where the session starts ---------------------------------------------
+# claude reads CLAUDE.md from the directory it is started in, and the one that
+# explains this machine lives in a repo. A launch from $HOME means "put it
+# somewhere sensible", not "here", so that is where it goes — and the session
+# comes up already knowing what the box is. Any other cwd is a deliberate
+# choice about which project you are in and is left alone. CC_CWD overrides
+# either way (CC_CWD=. to stay put), and --resume/--continue are exempt: a
+# conversation belongs to the directory it grew up in, which cc-resume.sh has
+# already cd'd to.
+#
+# The fallbacks matter more than the default. An unreadable or never-trusted
+# directory does not fail loudly — a detached session there hangs on the trust
+# prompt with nobody to answer it and reports NOT ARMED 30 seconds later — so
+# check both here and quietly stay put rather than launching into a hole.
+# Where $HOME-launched sessions go. Empty = off: launches stay where they were
+# called from. Set it to the repo whose CLAUDE.md describes this machine, and
+# make sure that directory carries hasTrustDialogAccepted in ~/.claude.json.
+CC_REPO="${CC_REPO:-}"
+
+trusted() {
+    command -v python3 >/dev/null 2>&1 || return 0   # can't tell; assume the best
+    python3 - "$1" <<'PYEOF'
+import json, os, sys
+try:
+    cfg = json.load(open(os.path.expanduser("~/.claude.json")))
+except Exception:
+    sys.exit(0)                                      # no config to disagree with
+p = (cfg.get("projects") or {}).get(sys.argv[1])
+sys.exit(0 if p and p.get("hasTrustDialogAccepted") else 1)
+PYEOF
+}
+
+RESUMING=0
+for _a in "$@"; do
+    case "$_a" in
+        --resume|-r|--continue|-c|--fork-session) RESUMING=1; break ;;
+    esac
+done
+
+START_DIR=""
+if [ -n "${CC_CWD:-}" ]; then
+    START_DIR="$CC_CWD"
+elif [ "$RESUMING" = 0 ] && [ -n "$CC_REPO" ] && [ "$PWD" = "$HOME" ]; then
+    START_DIR="$CC_REPO"
+fi
+if [ -n "$START_DIR" ]; then
+    if ! ABS_DIR="$(cd "$START_DIR" 2>/dev/null && pwd)"; then
+        echo "caleb_claude: $START_DIR is not a directory I can enter — staying in $PWD" >&2
+    elif [ "$ABS_DIR" != "$PWD" ]; then
+        if trusted "$ABS_DIR"; then
+            cd "$ABS_DIR"
+        else
+            echo "caleb_claude: $ABS_DIR has never been trusted in this account, so a" >&2
+            echo "              session there would hang on the trust prompt — staying in $PWD." >&2
+            echo "              Accept it once attached, or set hasTrustDialogAccepted for it" >&2
+            echo "              in ~/.claude.json." >&2
+        fi
+    fi
+fi
 
 # Already inside tmux, or no tmux at all — nesting is a hall of mirrors and a
 # missing binary is no reason to refuse. Either way, just run claude directly.
@@ -119,7 +186,7 @@ claude_pid() {
 }
 
 # -x/-y: a detached tmux session defaults to 80x24 and Claude's UI is cramped in
-# it. caleb_claude_ensure spawns 'phone' at 220x50 for the same reason.
+# it. A keepalive should spawn its always-on session at 220x50 for the same reason.
 tmux new-session -d -s "$SESSION" -x 220 -y 50 "$CMD"
 
 # Since v2.1.215 the --remote-control flag arms the bridge on its own within a
@@ -137,6 +204,7 @@ for _ in $(seq 1 30); do
 done
 
 echo "session:  $SESSION"
+echo "cwd:      $PWD"
 echo "attach:   tmux attach -t $SESSION"
 if [ -n "$LINK" ]; then
     echo "link:     https://claude.ai/code/$LINK"

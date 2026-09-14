@@ -175,7 +175,10 @@ cd "$CWD"
 # transcript is never written to by two processes and the original link keeps
 # pointing where it always did.
 FORKARG=(); [ "$FORK" = 1 ] && FORKARG=(--fork-session)
-OUT="$(CC_SESSION="$NAME" CC_PROMPT="$PROMPT" \
+# CC_CWD pins the directory explicitly: caleb_claude otherwise starts a fresh
+# session in CC_REPO, and a resumed conversation belongs where it grew up.
+# (It exempts --resume too; this is the belt to that pair of braces.)
+OUT="$(CC_SESSION="$NAME" CC_PROMPT="$PROMPT" CC_CWD="$CWD" \
        caleb_claude --detach --resume "$UUID" "${FORKARG[@]}" 2>&1)" \
     || { echo "$OUT"; exit 1; }
 if [ "$FORK" = 1 ]; then
@@ -185,5 +188,4 @@ else
     echo "resumed:  $TITLE"
     echo "uuid:     $UUID"
 fi
-echo "cwd:      $CWD"
 echo "$OUT"

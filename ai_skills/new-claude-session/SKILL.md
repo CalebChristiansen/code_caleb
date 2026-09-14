@@ -9,7 +9,7 @@ Three verbs, one link at the end of each:
 
 | you want | command |
 |---|---|
-| a **new** session | `cd ~ && caleb_claude --detach` |
+| a **new** session | `caleb_claude --detach` |
 | **that one from earlier**, continued | `scripts/cc-resume.sh "<whatever they called it>"` |
 | **a copy** of a session, original left running | `scripts/cc-resume.sh --fork "<name>"` |
 
@@ -32,6 +32,11 @@ override with `CC_CLAUDE_BIN`. Never let it resolve a bare `claude`: a stale
 system-wide copy without `--remote-control` dies instantly on an unknown option, the
 pane exits, and the failure reads as "the session won't arm".
 
+Set `CC_REPO` in it to the repo whose `CLAUDE.md` describes the machine and new
+sessions start there rather than wherever the caller happened to be standing. It is
+off until you set it, and the directory needs `hasTrustDialogAccepted` first — see the
+failure modes below.
+
 `scripts/cc-resume.sh` and `scripts/cc-sessions.py` stay in the skill directory and are
 run by path; they only need `caleb_claude` on `PATH` and `python3`.
 
@@ -45,8 +50,19 @@ has to be hand-carried to the other**, so keep them somewhere the drift is visib
 ## New session
 
 ```bash
-cd ~ && caleb_claude --detach
+caleb_claude --detach
 ```
+
+Called from `$HOME` — which is where an agent almost always is — it comes up in
+**`$CC_REPO`** instead. `CLAUDE.md` is only read from the directory claude actually
+starts in, so a session that starts anywhere else is a session that has to be told what
+machine it is on. Called from anywhere but `$HOME` it stays put: a deliberate cwd is a
+deliberate choice about which project you are in. `CC_CWD=/some/path` overrides either
+way and `CC_CWD=.` stays exactly where you are.
+
+Memory is per-directory as well — `~/.claude/projects/<slugged-cwd>/memory` — so moving
+where sessions start also moves which memories load, silently and with no error to read.
+Symlink the new directory's `memory` at the old one and both share a store.
 
 Name it after what it's for — `caleb_claude-4` tells nobody anything:
 
@@ -72,7 +88,8 @@ scripts/cc-resume.sh "that auth thing"
 Takes a session UUID or whatever the session was actually called, which is rarely its
 name. It searches every transcript under `~/.claude/projects/`, matches fuzzily against
 the AI-generated title, tmux name, last prompt and directory, then resumes the winner in
-a fresh detached tmux session — in the **original working directory**, under a name
+a fresh detached tmux session — in the **original working directory** (a conversation
+belongs where it grew up, so the new-session redirect does not apply), under a name
 derived from the title.
 
 The whole conversation comes back: history replayed into the pane, full context, **and
@@ -150,13 +167,14 @@ scripts/cc-sessions.py self                          # uuid of the calling sessi
   the input box with `C-u` first — claude restores the last unsent *draft* for a
   directory and send-keys appends, so without that the new prompt gets welded onto the
   tail of whatever was abandoned there and both go in as one sentence.
-- **`cd ~` first when starting something new.** The new session inherits the working
-  directory, and a directory Claude has never seen shows a trust prompt ("Is this a
-  project you trust?"). Attached, a human answers it. Detached, nobody does, and it
-  waits forever: no state file, no bridge, `NOT ARMED`. The flag lives in
-  `~/.claude.json` under `projects → <dir> → hasTrustDialogAccepted`. `cc-resume.sh`
-  checks this up front and refuses with exit 5 rather than letting you watch a pane do
-  nothing for half a minute.
+- **A directory Claude has never seen shows a trust prompt** ("Is this a project you
+  trust?"). Attached, a human answers it. Detached, nobody does, and it waits forever:
+  no state file, no bridge, `NOT ARMED`. The flag lives in `~/.claude.json` under
+  `projects → <dir> → hasTrustDialogAccepted`. `caleb_claude` checks it before moving
+  anywhere and stays put with a warning rather than launching into a hole;
+  `cc-resume.sh` checks it up front and refuses with exit 5 rather than letting you
+  watch a pane do nothing for half a minute. **Anywhere you point `CC_CWD` needs the
+  flag set first.**
 - **Resume is not directory-scoped, but the resumed session still inherits a cwd.**
   `--resume <uuid>` finds the conversation from anywhere, then drops it in whatever
   directory you happened to be standing in — quietly repointing it at a different
