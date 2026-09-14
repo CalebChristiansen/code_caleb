@@ -10,12 +10,12 @@
 # --remote-control. CC_PROMPT=... sets one without any guessing.
 # Also invocable as `cclaude`.
 #
-# Set CC_REPO below and a launch from $HOME starts the session there instead,
-# because CLAUDE.md is only read from the directory claude actually starts in —
-# point it at the repo whose CLAUDE.md describes the machine and every new
-# session comes up knowing where it is. CC_CWD=/path starts somewhere else;
-# CC_CWD=. stays exactly where you are. Resuming is exempt — a conversation
-# keeps its own cwd.
+# Set CC_REPO in ~/.config/caleb_claude/config and a launch from $HOME starts
+# the session there instead, because CLAUDE.md is only read from the directory
+# claude actually starts in — point it at the repo whose CLAUDE.md describes the
+# machine and every new session comes up knowing where it is. CC_CWD=/path
+# starts somewhere else; CC_CWD=. stays exactly where you are. Resuming is
+# exempt — a conversation keeps its own cwd.
 #
 # Each bare launch spins up its own session, so you can run several at once:
 #   caleb_claude          -> caleb_claude, then caleb_claude-2, -3, ... as needed
@@ -38,6 +38,28 @@ DETACH=0
 case "${1:-}" in
     --detach|-d) DETACH=1; shift ;;
 esac
+
+# ---- machine-local defaults ------------------------------------------------
+# CC_REPO and friends describe one particular machine, so they live in a file
+# rather than in this script — which is what lets this script be the only copy
+# of itself anywhere. An exported variable alone would not do the job: the
+# contexts that launch sessions are precisely the ones with no environment worth
+# the name — cron's threadbare PATH, tmux's `/bin/sh -c`, and agent shells,
+# which never read .bashrc. So read the defaults here instead of hoping someone
+# else did, from the first of these that exists:
+#
+#   $CC_CONFIG · ~/.config/caleb_claude/config · /etc/caleb_claude.conf
+#
+# Write each line as CC_FOO="${CC_FOO:-value}" so anything already exported
+# still wins. No such file anywhere is a supported state: the script then
+# behaves exactly as it did before there was one.
+for _cfg in "${CC_CONFIG:-}" "${XDG_CONFIG_HOME:-$HOME/.config}/caleb_claude/config" "/etc/caleb_claude.conf"; do
+    [ -n "$_cfg" ] && [ -r "$_cfg" ] || continue
+    # shellcheck source=/dev/null
+    . "$_cfg"
+    break
+done
+unset _cfg
 
 # Absolute path, not bare `claude`. tmux runs the command below through
 # `/bin/sh -c`, which is neither login nor interactive, so it does not read
@@ -62,9 +84,10 @@ CLAUDE=("$CLAUDE_BIN" --dangerously-skip-permissions --remote-control)
 # directory does not fail loudly — a detached session there hangs on the trust
 # prompt with nobody to answer it and reports NOT ARMED 30 seconds later — so
 # check both here and quietly stay put rather than launching into a hole.
-# Where $HOME-launched sessions go. Empty = off: launches stay where they were
-# called from. Set it to the repo whose CLAUDE.md describes this machine, and
-# make sure that directory carries hasTrustDialogAccepted in ~/.claude.json.
+# Where $HOME-launched sessions go — set it in the defaults file above, to the
+# repo whose CLAUDE.md describes this machine, and make sure that directory
+# carries hasTrustDialogAccepted in ~/.claude.json. Empty = off: launches stay
+# where they were called from.
 CC_REPO="${CC_REPO:-}"
 
 trusted() {

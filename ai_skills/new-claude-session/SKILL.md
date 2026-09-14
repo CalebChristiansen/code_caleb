@@ -18,13 +18,12 @@ whole handoff: tap it and you're talking to the session.
 
 ## Install
 
-`scripts/caleb_claude` is the launcher. Drop it somewhere on `PATH` and point a
-symlink at it:
+`scripts/caleb_claude` is the launcher. **Symlink at it, don't copy it** — a copy is
+a second thing to fix when something here turns out to be wrong:
 
 ```bash
-install -m 755 scripts/caleb_claude ~/scripts/claude/caleb_claude
-ln -sf ~/scripts/claude/caleb_claude ~/.local/bin/caleb_claude
-ln -sf ~/scripts/claude/caleb_claude ~/.local/bin/cclaude     # muscle-memory alias
+ln -sf "$PWD/scripts/caleb_claude" ~/.local/bin/caleb_claude
+ln -sf "$PWD/scripts/caleb_claude" ~/.local/bin/cclaude       # muscle-memory alias
 ```
 
 It pins the CLI at `$HOME/.npm-global/bin/claude` rather than trusting `PATH` —
@@ -32,20 +31,38 @@ override with `CC_CLAUDE_BIN`. Never let it resolve a bare `claude`: a stale
 system-wide copy without `--remote-control` dies instantly on an unknown option, the
 pane exits, and the failure reads as "the session won't arm".
 
-Set `CC_REPO` in it to the repo whose `CLAUDE.md` describes the machine and new
-sessions start there rather than wherever the caller happened to be standing. It is
-off until you set it, and the directory needs `hasTrustDialogAccepted` first — see the
-failure modes below.
+Everything machine-specific goes in a defaults file, which is why the launcher can be
+a symlink to one shared copy. It reads the first of `$CC_CONFIG`,
+`~/.config/caleb_claude/config`, `/etc/caleb_claude.conf` that exists, and no file at
+all is a supported state:
+
+```bash
+# ~/.config/caleb_claude/config — or a symlink to it from wherever you keep such things
+CC_REPO="${CC_REPO:-/srv/your-repo}"
+```
+
+Every line is a *default*: the `${VAR:-value}` form means an exported variable still
+wins, so `CC_REPO=/elsewhere caleb_claude --detach` works for a one-off. `CC_REPO` is
+the repo whose `CLAUDE.md` describes the machine — it needs `hasTrustDialogAccepted`
+first, see the failure modes below.
+
+It has to be a file rather than something exported from a shell profile, because the
+contexts that launch sessions are exactly the ones with no environment worth the name:
+cron's threadbare `PATH`, tmux's `/bin/sh -c`, and agent shells, which skip `.bashrc`
+entirely. A variable set in `.bashrc` is a variable that is absent everywhere it
+matters.
 
 `scripts/cc-resume.sh` and `scripts/cc-sessions.py` stay in the skill directory and are
 run by path; they only need `caleb_claude` on `PATH` and `python3`.
 
-If you run a second Claude account on the same machine, give it its own copy of the
-launcher under its own name, with its own session prefix and its own keepalive
-session name — the two must never collide, because several long-lived Remote Control
-processes under one account rotate each other's OAuth refresh tokens (see the
-failure modes below). Near-twin launchers with no shared source drift; **a fix to one
-has to be hand-carried to the other**, so keep them somewhere the drift is visible.
+If you run a second Claude account on the same machine, it wants its own session
+prefix and its own keepalive session name — the two must never collide, because several
+long-lived Remote Control processes under one account rotate each other's OAuth refresh
+tokens (see the failure modes below). Point it at *this* launcher with its own defaults
+file rather than forking a near-twin: the accounts differ in their config, not in their
+code. Where the accounts cannot read each other's files a second install is forced on
+you, and then **a fix to one has to be hand-carried to the other** — so write down that
+it exists, somewhere the drift is visible.
 
 ## New session
 
